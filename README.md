@@ -1,54 +1,65 @@
-# mcp-server-starter
+# mcp-ai-agent-server
 
-[![CI](https://github.com/thiagoger/mcp-server-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/thiagoger/mcp-server-starter/actions/workflows/ci.yml)
+[![CI](https://github.com/thiagoger/mcp-ai-agent-server/actions/workflows/ci.yml/badge.svg)](https://github.com/thiagoger/mcp-ai-agent-server/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org)
-[![MCP](https://img.shields.io/badge/protocol-MCP-7C3AED.svg)](https://modelcontextprotocol.io)
+[![Protocol: MCP](https://img.shields.io/badge/protocol-MCP-7C3AED.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> A minimal, production-shaped [Model Context Protocol](https://modelcontextprotocol.io) server in Python - exposes synthetic-data generation as tools any AI agent can call.
+Give an AI agent a tool and let it do the work:
 
-MCP is the protocol that lets LLM clients (Claude Desktop, Claude Code, IDE agents) call your tools and read your resources over a clean, typed interface. This repo is a small, readable reference for how an MCP server is actually structured: typed tool functions, a resource endpoint, and stdio transport - the same shape I use when building MCP servers against real APIs (OAuth-guarded SaaS backends), minus the credentials.
+> **You:** Generate 20 companies of demo data with seed 7 and confirm the foreign keys are clean.
+>
+> **Claude** *(calls `generate_dataset` over MCP)* → 20 companies, 282 users, 360 invoices, 704 line items. Referential integrity: **PASS**.
 
-It exposes a [synthetic dataset generator](https://github.com/thiagotbx123/synthetic-data-forge) so an agent can spin up realistic, referentially-intact demo data on demand.
+That round trip is what this repo is about. It's a small, readable [Model Context Protocol](https://modelcontextprotocol.io) server in Python that turns plain functions into tools any MCP client (Claude Desktop, Claude Code, an IDE agent) can call. I build these against OAuth-guarded SaaS APIs at work; this is the same skeleton with the credentials stripped out, so the wiring is easy to read.
 
-## Tools & resources
+## The whole server is this shape
 
-| Kind | Name | What it does |
-|------|------|--------------|
-| tool | `generate_dataset(companies, months, seed)` | Generate data, return row counts + a sample invoice |
-| tool | `validate_dataset(companies, months, seed)` | Return only the referential-integrity report |
-| resource | `schema://dataset` | The relational schema the server produces |
+```python
+from mcp.server.fastmcp import FastMCP
 
-## Run it
+mcp = FastMCP("synthetic-data")
+
+@mcp.tool()
+def generate_dataset(companies: int = 8, seed: int = 42) -> dict:
+    """Generate referentially-intact demo data and return row counts."""
+    ...
+```
+
+Type hints become the tool schema the model sees. No glue code, no JSON-schema by hand. What the agent gets:
+
+| | name | what it does |
+|---|------|--------------|
+| tool | `generate_dataset` | build a dataset, return row counts + a sample invoice |
+| tool | `validate_dataset` | return just the referential-integrity report |
+| resource | `schema://dataset` | the relational schema the server produces |
+
+## Plug it into Claude
 
 ```bash
 pip install -r requirements.txt
-python server.py          # serves over stdio
+python server.py        # talks MCP over stdio
 ```
 
-## Register in an MCP client
-
-Claude Desktop (`claude_desktop_config.json`) or Claude Code:
-
-```json
+```jsonc
+// claude_desktop_config.json
 {
   "mcpServers": {
-    "synthetic-data": {
-      "command": "python",
-      "args": ["/absolute/path/to/server.py"]
-    }
+    "synthetic-data": { "command": "python", "args": ["/abs/path/server.py"] }
   }
 }
 ```
 
-Then ask the agent: *"Generate 20 companies of demo data with seed 7 and confirm referential integrity."*
+Restart the client and the three capabilities show up. Ask for data; the agent calls the tool and hands you back a clean dataset.
 
-## Why this shape
+## Where the real version differs
 
-- **Typed tools** - `FastMCP` turns annotated Python functions into MCP tools; the type hints become the tool schema the client sees.
-- **Deterministic** - same seed, same data; safe for reproducible demos and tests.
-- **No secrets** - a real server would add an OAuth 2.0 client and call an upstream API here; this starter keeps that boundary obvious and credential-free.
+A production server swaps the in-memory generator for an upstream API call and adds an OAuth 2.0 client right here. I kept that boundary deliberately obvious and credential-free so this stays a teaching copy, not a liability. The data generator itself is the standalone [synthetic-data-forge](https://github.com/thiagoger/synthetic-data-forge).
+
+## Tested
+
+`pytest` checks the generator's integrity and determinism *and* boots the MCP server to confirm it registers its tools. Green on Python 3.10 to 3.12.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT.
